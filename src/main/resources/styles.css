@@ -1,0 +1,41 @@
+.grid-container {
+  max-width: 1000px;
+}
+
+
+#drop-area {
+  background-color: #f9f9f9;
+  padding: 30px;
+  height: 100px;
+  border: solid;
+}
+
+#content-area {
+  padding-top: 16px;
+}
+
+.rounded-border {
+  border-radius: 30px;
+}
+
+.kv-table {
+  border-collapse: inherit;
+  padding-left: 10px;
+}
+
+.kv-table tbody tr td:first-child {
+  width: 200px;
+}
+
+h1 {
+  margin: auto;
+}
+
+.card img {
+  margin: auto;
+}
+
+pre {
+  background-color: lightgray;
+  font-size: 10pt;
+}
