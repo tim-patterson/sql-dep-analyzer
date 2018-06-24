@@ -24,11 +24,12 @@ apply plugin: 'kotlin2js'
 apply plugin: 'kotlin-dce-js'
 
 // stops us bundling full antlr compiler into our runtime
-configurations {
-    compile {
-        extendsFrom = extendsFrom.findAll { it != configurations.antlr }
-    }
-}
+// Might not be needed for js?
+//configurations {
+//    compile {
+//        extendsFrom = extendsFrom.findAll { it != configurations.antlr }
+//    }
+//}
 
 generateGrammarSource {
     arguments += ["-Dlanguage=Kotlin"]
