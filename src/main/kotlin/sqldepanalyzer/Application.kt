@@ -1,5 +1,8 @@
 package sqldepanalyzer
 
+import org.antlr.v4.kotlinruntime.ANTLRInputStream
+import org.antlr.v4.kotlinruntime.CommonTokenStream
+import org.antlr.v4.kotlinruntime.ConsoleErrorListener
 import org.w3c.dom.DragEvent
 import org.w3c.dom.Element
 import org.w3c.dom.events.Event
@@ -28,6 +31,7 @@ class Application(dropArea: Element) {
 
     private fun handleDrop(event: Event) {
         if (event is DragEvent) {
+            sqlFiles.clear()
             event.dataTransfer?.items?.asList()?.let {
                 val promises = it.filter { it.kind == "file" }.map {
                     val entry = it.webkitGetAsEntry()
@@ -35,9 +39,8 @@ class Application(dropArea: Element) {
                 }
                 Promise.all(promises.toTypedArray()).then {
                     println("Drop event done")
-                    sqlFiles.forEach {
-                        println("File: ${it.fullPath}\n${it.contents}\n\n\n")
-                    }
+                    println("Parsing files")
+                    sqlFiles.forEach(::parseSqlFile)
                 }
             }
         }
@@ -54,6 +57,32 @@ class Application(dropArea: Element) {
             }
         } else {
             entry.listEntries().then { Promise.all(it.map(::processEntry).toTypedArray()) }
+        }
+    }
+
+    private fun parseSqlFile(file: SqlFile) {
+        println("Parsing ${file.fullPath}")
+        val input = ANTLRInputStream(file.contents)
+        val lexer = SqlLexer(input)
+        val tokens = CommonTokenStream(lexer)
+        val parser = SqlParser(tokens)
+        parser.addErrorListener(ConsoleErrorListener())
+        parser.file().findStmt().map(::parseStmt)
+    }
+
+    private fun parseStmt(node: SqlParser.StmtContext) {
+        node.findCreate_table_stmt()?.let(::parseCreateTableStmt)
+    }
+
+    private fun parseCreateTableStmt(node: SqlParser.Create_table_stmtContext) {
+        node.findTable_identifier()?.let(::parseTableIdentifier)
+    }
+
+    private fun parseTableIdentifier(node: SqlParser.Table_identifierContext) {
+        if (node.findIndentifier().size == 2) {
+            println("Found fully qualified table ${node.findIndentifier(0)?.text}.${node.findIndentifier(1)?.text}")
+        } else {
+            println("Found table ${node.findIndentifier(0)?.text}")
         }
     }
 }

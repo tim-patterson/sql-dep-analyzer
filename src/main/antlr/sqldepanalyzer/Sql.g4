@@ -4,137 +4,227 @@ grammar Sql;
  package sqldepanalyzer;
 }
 
-stmt
-  : select_stmt ';'
-  | describe_stmt ';'
-  | EXPLAIN select_stmt ';'
-  | insert_stmt ';'
+file
+  : stmt (';' stmt)* ';'? EOF
   ;
 
-insert_stmt
-  : INSERT INTO? table select_stmt
+stmt
+  : create_database_stmt
+  | create_table_stmt
+  | create_view_stmt
+  | set_stmt
+  | add_stmt
+  | select_stmt
+  ;
+
+create_database_stmt
+  : CREATE DATABASE (IF NOT EXISTS)? IDENTIFIER
+  ;
+
+create_table_stmt
+  : CREATE TEMPORARY? EXTERNAL? TABLE (IF NOT EXISTS)? table_identifier
+  create_table_field_list?
+  create_table_comment_clause?
+  create_table_partition_clause?
+  create_table_row_format_clause?
+  create_table_stored_as_clause?
+  create_table_location_clause?
+  create_table_tblproperties_clause?
+  ;
+
+create_table_comment_clause
+  : COMMENT STRING_LITERAL
+  ;
+
+create_table_partition_clause
+  : PARTITIONED BY create_table_field_list
+  ;
+
+create_table_row_format_clause
+  : ROW FORMAT SERDE STRING_LITERAL (WITH SERDEPROPERTIES create_table_properties_list )?
+  | ROW FORMAT DELIMITED
+  | ROW FORMAT DELIMITED FIELDS TERMINATED BY STRING_LITERAL (ESCAPED BY STRING_LITERAL)?
+  ;
+
+create_table_stored_as_clause
+  : STORED AS IDENTIFIER
+  | STORED AS INPUTFORMAT STRING_LITERAL OUTPUTFORMAT STRING_LITERAL
+  ;
+
+create_table_location_clause
+  : LOCATION STRING_LITERAL
+  ;
+
+create_table_tblproperties_clause
+  : TBLPROPERTIES create_table_properties_list
+  ;
+
+create_table_field_list
+  : '(' (field_spec (',' field_spec)*)? ')'
+  ;
+
+create_table_properties_list
+  : '(' (create_table_property (',' create_table_property)*)? ')'
+  ;
+
+create_table_property
+  : STRING_LITERAL '=' STRING_LITERAL
+  ;
+
+create_view_stmt
+  : CREATE VIEW (IF NOT EXISTS)? table_identifier AS select_stmt
+  ;
+
+set_stmt
+  : SET config_variable '=' anything*
+  ;
+
+add_stmt
+  : ADD anything*
+  ;
+
+field_spec
+  : indentifier type
+  ;
+
+type
+  : IDENTIFIER ('(' NUMERIC_LITERAL ( ',' NUMERIC_LITERAL)?')')?
+  | IDENTIFIER '<' type '>' // array
+  | IDENTIFIER '<' IDENTIFIER ':' type (',' IDENTIFIER ':' type)* '>' // struct
+  | IDENTIFIER '<' IDENTIFIER (',' IDENTIFIER)* '>' // map
   ;
 
 select_stmt
-  : STREAMING? SELECT named_expr ( ',' named_expr )* FROM source predicate? group_by? order_by? (LIMIT NUMERIC_LITERAL)?
+  : select_clause from_clause?
   ;
 
-named_expr
-  : expr
-  | expr AS? IDENTIFIER
+select_clause
+  : SELECT named_expression*
   ;
 
-group_by
-  : GROUP BY expr ( ',' expr )* linger_expr?
+from_clause
+  : FROM table_identifier
   ;
 
-linger_expr
-  : LINGER NUMERIC_LITERAL
+named_expression
+  : expression
+  | expression AS indentifier
   ;
 
-order_by_expr
-  : expr
-  | expr DESC
-  | expr ASC
-  ;
-
-order_by
-  : ORDER BY order_by_expr ( ',' order_by_expr )*
-  ;
-
-predicate
-  : WHERE expr
-  ;
-
-describe_stmt
-  : DESCRIBE table
-  ;
-
-expr
-  : '(' expr ')'
-  | expr OP_IDX expr ']'
-  | expr OP_DOT IDENTIFIER
-  | STRING_LITERAL
+expression
+  : indentifier
   | NUMERIC_LITERAL
-  | function_call
+  | STRING_LITERAL
+  ;
+
+table_identifier
+  : indentifier ('.' indentifier)?
+  ;
+
+config_variable
+  : indentifier ('.' indentifier)*
+  ;
+
+indentifier
+  : IDENTIFIER
+  | keyword
+  ;
+
+// Rules needed to make the set statement work
+
+anything
+  : keyword
+  | operator
   | IDENTIFIER
-  | expr ( OP_MULT | OP_DIV ) expr
-  | expr ( OP_PLUS | OP_MINUS ) expr
-  | expr ( OP_GT | OP_GTE | OP_LT | OP_LTE ) expr
-  | expr ( OP_EQ | OP_NEQ ) expr
-  | expr IS NULL
-  | expr IS NOT NULL
-  | expr ( OP_AND | OP_OR ) expr
-  | TRUE
-  | FALSE
-  | NULL
+  | NUMERIC_LITERAL
+  | STRING_LITERAL
+  | ':'
   ;
 
-table
-  : table_type STRING_LITERAL
+keyword
+  : ADD
+  | AS
+  | BY
+  | COMMENT
+  | CREATE
+  | DATABASE
+  | DELIMITED
+  | ESCAPED
+  | EXISTS
+  | EXTERNAL
+  | FIELDS
+  | FORMAT
+  | FROM
+  | IF
+  | INPUTFORMAT
+  | LOCATION
+  | NOT
+  | OUTPUTFORMAT
+  | PARTITIONED
+  | ROW
+  | SERDE
+  | SERDEPROPERTIES
+  | SELECT
+  | SET
+  | STORED
+  | TABLE
+  | TBLPROPERTIES
+  | TEMPORARY
+  | TERMINATED
+  | WITH
+  | VIEW
   ;
 
-table_type
-  : JSON
-  | CSV
-  | DIR
+operator
+  : OP_PLUS
+  | OP_MINUS
+  | OP_MULT
+  | OP_DIV
+  | OP_GT
+  | OP_GTE
+  | OP_LT
+  | OP_LTE
+  | OP_EQ
+  | OP_NEQ
+  | OP_DOT
+  | OP_IDX
+  | OP_AND
+  | OP_OR
   ;
 
-subquery
-  : '(' select_stmt ')'
-  ;
-
-lateral_view
-  : LATERAL VIEW named_expr
-  ;
-
-join
-  : JOIN table_or_subquery ON expr
-  ;
-
-source
-  : table_or_subquery (join)*
-  ;
-
-table_or_subquery
-  : table (AS? IDENTIFIER)?
-  | subquery (AS? IDENTIFIER)?
-  | table_or_subquery lateral_view
-  ;
-
-function_call
-  : IDENTIFIER '(' (expr ( ',' expr )*)? ')'
-  ;
 
 // Key words
-DESCRIBE: D E S C R I B E;
-SELECT: S E L E C T;
-JSON: J S O N;
-CSV: C S V;
-DIR: D I R;
-FROM: F R O M;
-LIMIT: L I M I T;
-WHERE: W H E R E;
-EXPLAIN: E X P L A I N;
-GROUP: G R O U P;
-ORDER: O R D E R;
-BY: B Y;
+ADD: A D D;
 AS: A S;
-ASC: A S C;
-DESC: D E S C;
-IS: I S;
+BY: B Y;
+COMMENT: C O M M E N T;
+CREATE: C R E A T E;
+DATABASE: D A T A B A S E;
+DELIMITED: D E L I M I T E D;
+ESCAPED: E S C A P E D;
+EXISTS: E X I S T S;
+EXTERNAL: E X T E R N A L;
+FIELDS: F I E L D S;
+FORMAT: F O R M A T;
+FROM: F R O M;
+IF: I F;
+INPUTFORMAT: I N P U T F O R M A T;
+LOCATION: L O C A T I O N;
 NOT: N O T;
-NULL: N U L L;
-TRUE: T R U E;
-FALSE: F A L S E;
-LATERAL: L A T E R A L;
+OUTPUTFORMAT: O U T P U T F O R M A T;
+PARTITIONED: P A R T I T I O N E D;
+ROW: R O W;
+SERDE: S E R D E;
+SERDEPROPERTIES: S E R D E P R O P E R T I E S;
+SELECT: S E L E C T;
+SET: S E T;
+STORED: S T O R E D;
+TABLE: T A B L E;
+TBLPROPERTIES: T B L P R O P E R T I E S;
+TEMPORARY: T E M P O R A R Y;
+TERMINATED: T E R M I N A T E D;
+WITH: W I T H;
 VIEW: V I E W;
-JOIN: J O I N;
-ON: O N;
-INSERT: I N S E R T;
-INTO: I N T O;
-STREAMING: S T R E A M I N G;
-LINGER: L I N G E R;
 
 
 OP_PLUS: '+';
@@ -152,7 +242,6 @@ OP_IDX: '[';
 OP_AND: A N D;
 OP_OR: O R;
 
-
 IDENTIFIER
  : [a-zA-Z_] [a-zA-Z_0-9]*
  | '`' ( ~'`' )* '`'
@@ -168,8 +257,8 @@ NUMERIC_LITERAL
  ;
 
 STRING_LITERAL
- : '\'' ( ~'\'' )* '\''
- | '"' ( ~'"' )* '"'
+ : '\'' (~'\'')* '\''
+ | '"' (('\\' .) | ~('\\' | '"'))* '"'
  ;
 
 // Whitespace
