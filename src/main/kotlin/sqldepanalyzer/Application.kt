@@ -79,10 +79,11 @@ class Application(dropArea: Element) {
     }
 
     private fun parseTableIdentifier(node: SqlParser.Table_identifierContext) {
-        if (node.findIndentifier().size == 2) {
-            println("Found fully qualified table ${node.findIndentifier(0)?.text}.${node.findIndentifier(1)?.text}")
+        val i = node.findQualified_identifier()!!
+        if (i.findIndentifier().size == 2) {
+            println("Found fully qualified table ${i.findIndentifier(0)?.text}.${i.findIndentifier(1)?.text}")
         } else {
-            println("Found table ${node.findIndentifier(0)?.text}")
+            println("Found table ${i.findIndentifier(0)?.text}")
         }
     }
 }
