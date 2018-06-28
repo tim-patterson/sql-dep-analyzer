@@ -19,6 +19,13 @@ stmt
   | grant_stmt
   | alter_table_stmt
   | analyze_stmt
+  | create_function_stmt
+  | create_macro_stmt
+  | drop_table_stmt
+  | drop_view_stmt
+  | truncate_table_stmt
+  | cte_clause? hive_multi_insert_stmt
+  | BEGIN ';' (stmt ';')* END
   ;
 
 create_database_stmt
@@ -93,16 +100,36 @@ add_stmt
   : ADD anything*
   ;
 
+create_function_stmt
+  : CREATE TEMPORARY? FUNCTION anything*
+  ;
+
+create_macro_stmt
+  : CREATE TEMPORARY? MACRO anything*
+  ;
+
 cte_clause
   : WITH cte_sub_clause (',' cte_sub_clause)*
   ;
 
 cte_sub_clause
-  : indentifier AS '(' select_stmt ')'
+  : identifier AS '(' select_stmt ')'
   ;
 
 analyze_stmt
   : ANALYZE table_identifier
+  ;
+
+drop_table_stmt
+  : DROP TABLE (IF EXISTS)? table_identifier CASCADE?
+  ;
+
+drop_view_stmt
+  : DROP VIEW (IF EXISTS)? table_identifier CASCADE?
+  ;
+
+truncate_table_stmt
+  : TRUNCATE TABLE table_identifier
   ;
 
 grant_stmt
@@ -110,7 +137,7 @@ grant_stmt
   ;
 
 field_spec
-  : indentifier type (NOT NULL)? (DEFAULT expression)? SORTKEY? DISTKEY? indentifier* create_table_comment_clause?// extra stuff..
+  : identifier type (NOT NULL)? (DEFAULT expression)? SORTKEY? DISTKEY? identifier* create_table_comment_clause?// extra stuff..
   ;
 
 alter_table_stmt
@@ -118,10 +145,10 @@ alter_table_stmt
   ;
 
 type
-  : IDENTIFIER ('(' NUMERIC_LITERAL ( ',' NUMERIC_LITERAL)?')')?
-  | IDENTIFIER '<' type '>' // array
-  | IDENTIFIER '<' indentifier ':' type (',' indentifier ':' type)* '>' // struct
-  | IDENTIFIER '<' indentifier (',' indentifier)* '>' // map
+  : identifier ('(' NUMERIC_LITERAL ( ',' NUMERIC_LITERAL)?')')?
+  | IDENTIFIER OP_LT type OP_GT // array
+  | IDENTIFIER OP_LT identifier ':' type (',' identifier ':' type)* OP_GT // struct
+  | IDENTIFIER OP_LT identifier (',' identifier)* OP_GT // map
   ;
 
 select_stmt
@@ -129,8 +156,11 @@ select_stmt
   from_clause?
   where_clause?
   group_by_clause?
+  having_clause?
   order_by_clause?
   limit_clause?
+  cluster_by_clause?
+  | select_stmt UNION ALL? select_stmt
   ;
 
 select_clause
@@ -138,18 +168,27 @@ select_clause
   ;
 
 insert_stmt
-  : INSERT OVERWRITE? TABLE table_identifier
+  : INSERT (OVERWRITE | INTO) TABLE? table_identifier
   (PARTITION '(' partition_spec (',' partition_spec)* ')')?
-  select_stmt
+  (select_stmt | '(' select_stmt ')')
+  ;
+
+hive_multi_insert_stmt
+  : from_clause (insert_stmt)*
   ;
 
 partition_spec
-  : indentifier
-  | indentifier OP_EQ literal
+  : identifier
+  | identifier OP_EQ literal
   ;
 
 from_clause
-  : FROM source IDENTIFIER?
+  : FROM sources
+  ;
+
+sources
+  : source (',' source)* // people shouldnt do this!!
+  | source ((LEFT | RIGHT)? (INNER | (FULL? OUTER))? SEMI? JOIN source (ON expression)?)*
   ;
 
 where_clause
@@ -157,7 +196,15 @@ where_clause
   ;
 
 group_by_clause
-  : GROUP BY expression (',' expression)*
+  : GROUP BY expression_list (GROUPING SETS '(' (grouping_set (',' grouping_set)* )? ')')?
+  ;
+
+grouping_set
+  : '(' expression_list ')'
+  ;
+
+having_clause
+  : HAVING expression
   ;
 
 order_by_clause
@@ -168,19 +215,24 @@ limit_clause
   : LIMIT NUMERIC_LITERAL
   ;
 
+cluster_by_clause
+  : CLUSTER BY expression_list
+  | DISTRIBUTE BY expression_list (SORT BY expression_list)?
+  ;
+
 order_expression
-  : expression
-  | expression (ASC | DESC)
+  : expression (ASC | DESC)? (NULLS (FIRST | LAST))?
   ;
 
 source
-  : table_identifier
-  | '(' select_stmt ')'
+  : table_identifier (AS? identifier)?
+  | '(' select_stmt ')' (AS? identifier)?
+  | source LATERAL VIEW OUTER? expression identifier (AS identifier)?
   ;
 
 named_expression
   : expression
-  | expression AS indentifier
+  | expression AS? identifier
   ;
 
 expression
@@ -188,24 +240,39 @@ expression
   | function_call
   | qualified_identifier
   | literal
+  | expression OP_CONCAT expression
   | expression OP_AND expression
   | expression OP_OR expression
   | expression ( OP_MULT | OP_DIV ) expression
   | expression ( OP_PLUS | OP_MINUS ) expression
   | expression ( OP_GT | OP_GTE | OP_LT | OP_LTE ) expression
-  | expression ( OP_EQ | OP_NEQ ) expression
+  | expression ( OP_EQ | OP_NEQ | OP_NS_EQ ) expression
   | expression IS NOT? NULL
   | expression ( OP_AND | OP_OR ) expression
   | expression NOT? LIKE STRING_LITERAL
   | expression NOT? IN '(' (literal (',' literal)*)? ')'
+  | expression NOT? IN '(' select_stmt ')'
+  | expression NOT? IN hive_var_literal
+  | NOT expression
   | '*'
-  | indentifier OP_DOT '*'
+  | expression OP_DOT identifier
+  | identifier OP_DOT '*'
   | CAST '(' expression AS type ')'
+  | expression '::' type // pg style cast
+  | expression BETWEEN expression OP_AND expression
+  | CASE expression? (WHEN expression THEN expression)* (ELSE expression)? END
+  | expression '[' expression ']'
+  | OP_MINUS expression
   ;
 
 function_call
-  : indentifier '(' DISTINCT? (expression (',' expression)*)? ')'
-  | indentifier '(' (expression (',' expression)*)? ')' OVER '('(PARTITION BY (expression (',' expression)*)?)? order_by_clause?')'
+  : identifier '(' DISTINCT? (expression (',' expression)*)? ')'
+  | identifier '(' identifier FROM expression ')' // Werid syntax for hives extract function
+  | identifier '(' expression_list ')' OVER '('(PARTITION BY expression_list)? order_by_clause?')'
+  ;
+
+expression_list
+  :  (expression (',' expression)*)?
   ;
 
 table_identifier
@@ -213,14 +280,14 @@ table_identifier
   ;
 
 qualified_identifier
-  : indentifier ('.' indentifier)?
+  : identifier (OP_DOT identifier)?
   ;
 
 config_variable
-  : indentifier ('.' indentifier)*
+  : (identifier ':')? identifier ((OP_DOT | OP_MINUS) identifier)*
   ;
 
-indentifier
+identifier
   : IDENTIFIER
   | keyword
   ;
@@ -231,67 +298,106 @@ anything
   : keyword
   | operator
   | IDENTIFIER
-  | NUMERIC_LITERAL
-  | STRING_LITERAL
+  | literal
   | ':'
+  | '{'
+  | '}'
+  | '('
+  | ')'
+  | ','
   ;
 
 keyword
   : ADD
+  | ALL
   | ALTER
   | ANALYZE
   | AS
   | ASC
   | AUTHORIZATION
+  | BEGIN
+  | BETWEEN
   | BY
+  | CASCADE
   | CAST
+  | CASE
+  | CLUSTER
   | COMMENT
   | CREATE
   | DATABASE
+  | DATE
   | DEFAULT
   | DELIMITED
   | DESC
   | DISTKEY
   | DISTINCT
+  | DISTRIBUTE
+  | DROP
+  | ELSE
+  | END
   | ESCAPED
   | EXISTS
   | EXTERNAL
   | FALSE
   | FIELDS
+  | FIRST
   | FORMAT
+  | FULL
+  | FUNCTION
   | FROM
   | GRANT
   | GROUP
+  | GROUPING
+  | HAVING
   | IF
   | IN
+  | INNER
   | INSERT
+  | INTERVAL
+  | INTO
   | IS
   | INPUTFORMAT
+  | JOIN
+  | LAST
+  | LATERAL
+  | LEFT
   | LIKE
   | LIMIT
   | LOCATION
+  | MACRO
   | NOT
   | NULL
+  | NULLS
+  | ON
   | ORDER
+  | OUTER
   | OUTPUTFORMAT
   | OVER
   | OVERWRITE
   | PARTITION
   | PARTITIONED
+  | RIGHT
   | ROW
   | SCHEMA
   | SERDE
   | SERDEPROPERTIES
   | SELECT
+  | SEMI
   | SET
+  | SETS
+  | SORT
   | SORTKEY
   | STORED
   | TABLE
   | TBLPROPERTIES
   | TEMPORARY
   | TERMINATED
+  | THEN
   | TRUE
+  | TRUNCATE
+  | UNION
   | WITH
+  | WHEN
   | WHERE
   | VIEW
   ;
@@ -308,76 +414,119 @@ operator
   | OP_EQ
   | OP_NEQ
   | OP_DOT
-  | OP_IDX
   | OP_AND
   | OP_OR
+  | OP_NS_EQ
+  | OP_CONCAT
   ;
 
 literal
-  : STRING_LITERAL
+  : DATE STRING_LITERAL
+  | INTERVAL STRING_LITERAL IDENTIFIER?
+  | STRING_LITERAL
   | NUMERIC_LITERAL
   | TRUE
   | FALSE
   | NULL
+  | hive_var_literal
+  ;
+
+hive_var_literal
+  : '${' config_variable '}'
   ;
 
 
 // Key words
 ADD: A D D;
+ALL: A L L;
 ALTER: A L T E R;
 ANALYZE: A N A L Y Z E;
 AS: A S;
 ASC: A S C;
 AUTHORIZATION: A U T H O R I Z A T I O N;
+BEGIN: B E G I N;
+BETWEEN: B E T W E E N;
 BY: B Y;
+CASCADE: C A S C A D E;
+CASE: C A S E;
 CAST: C A S T;
+CLUSTER: C L U S T E R;
 COMMENT: C O M M E N T;
 CREATE: C R E A T E;
 DATABASE: D A T A B A S E;
+DATE: D A T E;
 DEFAULT: D E F A U L T;
 DELIMITED: D E L I M I T E D;
 DESC: D E S C;
 DISTKEY: D I S T K E Y;
 DISTINCT: D I S T I N C T;
+DISTRIBUTE: D I S T R I B U T E;
+DROP: D R O P;
+ELSE: E L S E;
+END: E N D;
 ESCAPED: E S C A P E D;
 EXISTS: E X I S T S;
 EXTERNAL: E X T E R N A L;
 FALSE: F A L S E;
 FIELDS: F I E L D S;
+FIRST: F I R S T;
 FORMAT: F O R M A T;
 FROM: F R O M;
+FULL: F U L L;
+FUNCTION: F U N C T I O N;
 GRANT: G R A N T;
 GROUP: G R O U P;
+GROUPING: G R O U P I N G;
+HAVING: H A V I N G;
 IF: I F;
 IN: I N;
+INNER: I N N E R;
 INSERT: I N S E R T;
+INTERVAL: I N T E R V A L;
+INTO: I N T O;
 IS: I S;
 INPUTFORMAT: I N P U T F O R M A T;
+JOIN: J O I N;
+LAST: L A S T;
+LATERAL: L A T E R A L;
+LEFT: L E F T;
 LIKE: L I K E;
 LIMIT: L I M I T;
 LOCATION: L O C A T I O N;
+MACRO: M A C R O;
 NOT: N O T;
 NULL: N U L L;
+NULLS: N U L L S;
+ON: O N;
 ORDER: O R D E R;
+OUTER: O U T E R;
 OUTPUTFORMAT: O U T P U T F O R M A T;
 OVER: O V E R;
 OVERWRITE: O V E R W R I T E;
 PARTITION: P A R T I T I O N;
 PARTITIONED: P A R T I T I O N E D;
+RIGHT: R I G H T;
 ROW: R O W;
 SCHEMA: S C H E M A;
 SERDE: S E R D E;
 SERDEPROPERTIES: S E R D E P R O P E R T I E S;
 SELECT: S E L E C T;
+SEMI: S E M I;
 SET: S E T;
+SETS: S E T S;
+SORT: S O R T;
 SORTKEY: S O R T K E Y;
 STORED: S T O R E D;
 TABLE: T A B L E;
 TBLPROPERTIES: T B L P R O P E R T I E S;
 TEMPORARY: T E M P O R A R Y;
 TERMINATED: T E R M I N A T E D;
+THEN: T H E N;
 TRUE: T R U E;
+TRUNCATE: T R U N C A T E;
+UNION: U N I O N;
 WITH: W I T H;
+WHEN: W H E N;
 WHERE: W H E R E;
 VIEW: V I E W;
 
@@ -391,9 +540,10 @@ OP_GTE: '>=';
 OP_LT: '<';
 OP_LTE: '<=';
 OP_EQ: '=' | '==';
+OP_NS_EQ: '<=>';
 OP_NEQ: '!=' | '<>';
 OP_DOT: '.';
-OP_IDX: '[';
+OP_CONCAT: '||';
 OP_AND: A N D;
 OP_OR: O R;
 
@@ -406,13 +556,17 @@ SINGLE_LINE_COMMENT
  : '--' ~[\r\n]* -> channel(HIDDEN)
  ;
 
+MULTI_LINE_COMMENT
+ : '/*' .*? '*/' -> channel(HIDDEN)
+ ;
+
 // Literals
 NUMERIC_LITERAL
- : '-'? DIGIT+ ( '.' DIGIT* )?
+ : DIGIT+ ( '.' DIGIT* )?
  ;
 
 STRING_LITERAL
- : '\'' (~'\'')* '\''
+ : '\'' (('\\' .) | ~('\\' | '\''))* '\''
  | '"' (('\\' .) | ~('\\' | '"'))* '"'
  ;
 
