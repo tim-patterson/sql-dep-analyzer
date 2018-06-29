@@ -3,22 +3,25 @@ package sqldepanalyzer
 import org.antlr.v4.kotlinruntime.ANTLRInputStream
 import org.antlr.v4.kotlinruntime.CommonTokenStream
 import org.antlr.v4.kotlinruntime.ConsoleErrorListener
+import org.antlr.v4.kotlinruntime.tree.ParseTreeWalker
 import org.w3c.dom.DragEvent
 import org.w3c.dom.Element
 import org.w3c.dom.events.Event
+import org.w3c.dom.HTMLElement
+import org.w3c.dom.get
+import kotlin.browser.window
 import kotlin.js.Promise
 
 
-class Application(dropArea: Element) {
+class Application(private val dropArea: Element) {
     private val sqlFiles: MutableList<SqlFile> = mutableListOf()
+    private val meterBar: HTMLElement = dropArea.getElementsByClassName("progress-meter")[0] as HTMLElement  //document.getElementById("progress-bar")!! as HTMLElement
 
     init {
-        initializeDropEvents(dropArea)
+        initializeDropEvents()
     }
 
-
-
-    private fun initializeDropEvents(dropArea: Element) {
+    private fun initializeDropEvents() {
         // Stop the browser just opening the file
         listOf("dragenter", "dragleave", "dragover", "drop").forEach {
             dropArea.addEventListener(it, { event ->
@@ -31,17 +34,14 @@ class Application(dropArea: Element) {
 
     private fun handleDrop(event: Event) {
         if (event is DragEvent) {
-            sqlFiles.clear()
+
+            startUploadAndParse()
             event.dataTransfer?.items?.asList()?.let {
                 val promises = it.filter { it.kind == "file" }.map {
                     val entry = it.webkitGetAsEntry()
                     processEntry(entry)
                 }
-                Promise.all(promises.toTypedArray()).then {
-                    println("Drop event done")
-                    println("Parsing files")
-                    sqlFiles.forEach(::parseSqlFile)
-                }
+                Promise.all(promises.toTypedArray()).then { startParse() }
             }
         }
     }
@@ -60,6 +60,35 @@ class Application(dropArea: Element) {
         }
     }
 
+    private fun startUploadAndParse() {
+        meterBar.style.width = "0%"
+
+        sqlFiles.clear()
+    }
+
+    private fun startParse() {
+        val fileCount = sqlFiles.size
+        var currFile = 0
+        val iter = sqlFiles.iterator()
+        fun parseFiles() {
+            if (iter.hasNext()) {
+                currFile++
+                val file = iter.next()
+                parseSqlFile(file)
+                meterBar.style.width = "${100 * currFile / fileCount}%"
+                window.setTimeout(::parseFiles)
+            } else {
+                endParse()
+            }
+        }
+        parseFiles()
+    }
+
+
+    private fun endParse() {
+
+    }
+
     private fun parseSqlFile(file: SqlFile) {
         println("Parsing ${file.fullPath}")
         val input = ANTLRInputStream(file.contents)
@@ -67,25 +96,19 @@ class Application(dropArea: Element) {
         val tokens = CommonTokenStream(lexer)
         val parser = SqlParser(tokens)
         parser.addErrorListener(ConsoleErrorListener())
-        parser.file().findStmt().map(::parseStmt)
+
+        ParseTreeWalker.DEFAULT.walk(listener, parser.file())
     }
 
-    private fun parseStmt(node: SqlParser.StmtContext) {
-        node.findCreate_table_stmt()?.let(::parseCreateTableStmt)
-    }
-
-    private fun parseCreateTableStmt(node: SqlParser.Create_table_stmtContext) {
-        node.findTable_identifier()?.let(::parseTableIdentifier)
-    }
-
-    private fun parseTableIdentifier(node: SqlParser.Table_identifierContext) {
-        val i = node.findQualified_identifier()!!
-        if (i.findIdentifier().size == 2) {
-            println("Found fully qualified table ${i.findIdentifier(0)?.text}.${i.findIdentifier(1)?.text}")
-        } else {
-            println("Found table ${i.findIdentifier(0)?.text}")
+    val listener = object: SqlBaseListener() {
+        override fun enterTable_identifier(ctx: SqlParser.Table_identifierContext) {
+            val identifier = ctx.findQualified_identifier()!!
+            val tableName = identifier.findIdentifier().joinToString(".") { it.text }
+            println("Found table $tableName")
         }
     }
+
+
 }
 
 data class SqlFile(
