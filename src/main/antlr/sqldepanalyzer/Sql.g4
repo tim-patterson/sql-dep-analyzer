@@ -14,8 +14,8 @@ stmt
   | create_view_stmt
   | set_stmt
   | add_stmt
-  | cte_clause? select_stmt
-  | cte_clause? insert_stmt
+  | top_level_select_stmt
+  | top_level_insert_stmt
   | grant_stmt
   | alter_table_stmt
   | analyze_stmt
@@ -24,8 +24,16 @@ stmt
   | drop_table_stmt
   | drop_view_stmt
   | truncate_table_stmt
-  | cte_clause? hive_multi_insert_stmt
   | BEGIN ';' (stmt ';')* END
+  ;
+
+top_level_select_stmt
+  : cte_clause? select_stmt
+  ;
+
+top_level_insert_stmt
+  : cte_clause? insert_stmt
+  | cte_clause? hive_multi_insert_stmt
   ;
 
 create_database_stmt
@@ -72,7 +80,7 @@ create_table_tblproperties_clause
   ;
 
 create_table_field_list
-  : '(' (field_spec (',' field_spec)*)? ')'
+  : '(' (field_spec (',' field_spec)*)? (',' PRIMARY KEY '(' identifier (',' identifier)* ')')?')'
   ;
 
 create_table_like_clause
@@ -168,9 +176,13 @@ select_clause
   ;
 
 insert_stmt
-  : INSERT (OVERWRITE | INTO) TABLE? table_identifier
-  (PARTITION '(' partition_spec (',' partition_spec)* ')')?
+  : insert_clause
   (select_stmt | '(' select_stmt ')')
+  ;
+
+insert_clause
+  : INSERT (OVERWRITE | INTO) TABLE? table_identifier
+      (PARTITION '(' partition_spec (',' partition_spec)* ')')?
   ;
 
 hive_multi_insert_stmt
@@ -358,6 +370,7 @@ keyword
   | IS
   | INPUTFORMAT
   | JOIN
+  | KEY
   | LAST
   | LATERAL
   | LEFT
@@ -376,6 +389,7 @@ keyword
   | OVERWRITE
   | PARTITION
   | PARTITIONED
+  | PRIMARY
   | RIGHT
   | ROW
   | SCHEMA
@@ -487,6 +501,7 @@ INTO: I N T O;
 IS: I S;
 INPUTFORMAT: I N P U T F O R M A T;
 JOIN: J O I N;
+KEY: K E Y;
 LAST: L A S T;
 LATERAL: L A T E R A L;
 LEFT: L E F T;
@@ -505,6 +520,7 @@ OVER: O V E R;
 OVERWRITE: O V E R W R I T E;
 PARTITION: P A R T I T I O N;
 PARTITIONED: P A R T I T I O N E D;
+PRIMARY: P R I M A R Y;
 RIGHT: R I G H T;
 ROW: R O W;
 SCHEMA: S C H E M A;

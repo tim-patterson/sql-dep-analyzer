@@ -3,7 +3,7 @@ buildscript {
     ext.front_end_plugin_version = '0.0.31'
     ext.kotlinx_html_version = '0.6.10'
     ext.node_version = '10.5.0'
-    ext.antlr_kotlin_version = '9b55294'
+    ext.antlr_kotlin_version = '75472e8'
 
     repositories {
         mavenCentral()
