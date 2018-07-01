@@ -2,6 +2,9 @@
   max-width: 1000px;
 }
 
+body {
+  line-height: 1;
+}
 
 #drop-area {
   background-color: #f9f9f9;
@@ -35,6 +38,10 @@ h1 {
   margin: auto;
 }
 
+.dep-list {
+  font-size: 70%;
+}
+
 @media print {
   .tablesource, #drop-area {
     display: none;
@@ -42,5 +49,9 @@ h1 {
 
   #content-area .callout {
     page-break-inside: avoid;
+  }
+
+  table tbody tr td {
+    padding: 0.2rem .625rem;
   }
 }

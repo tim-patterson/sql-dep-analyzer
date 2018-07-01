@@ -84,40 +84,40 @@ class Application(private val dropArea: Element, private val contentArea: Elemen
 
 
     private fun endParse() {
-//        // For any queries that read from temp tables, we should replace the
-//        // temp tables in the "tablesread" with any source tables used to generate
-//        // the temp tables.
-//        sqlFiles.map { file ->
-//            val tempTables = file.definedTables.filter { it.temporary }.map { it.database to it.name }.toSet()
-//            val tempTableMappings = mutableMapOf<Pair<String, String>, MutableList<Pair<String, String>>>()
-//
-//            file.queries.map { query ->
-//                // update mappings for inserts into temp tables
-//                query.tablesWriten.filter { it in tempTables }.forEach {
-//                    val mappings = tempTableMappings.getOrPut(it) { mutableListOf() }
-//                    mappings.addAll(query.tablesRead)
-//                }
-//
-//                // Now lets do the actual updates for the queries reading these temp tables
-//                query.tablesRead.flatMap { tempTableMappings[it] ?: mutableListOf() }
-//            }
-//        }
-
-
-        val databases = sqlFiles.flatMap { file ->
+        // Add in any tables referenced but not defined
+        val allDefinedTables = sqlFiles.flatMap { file ->
             file.definedTables
-        }.filterNot { it.temporary }.groupBy { table -> table.database }.mapValues { (database, tables) ->
-            tables.sortedBy { it.name }
+        }.associateBy { it.id }
+
+        val allReferencedTables = sqlFiles.flatMap { it.queries }.flatMap { it.tablesRead + it.tablesWritten }.toSet()
+
+        val missingTableIds = allReferencedTables - allDefinedTables.keys
+
+        val missingTables = missingTableIds.map { Table(
+                id = it,
+                fields = listOf(),
+                temporary = false
+        )}.associateBy { it.id }
+
+        val allTables = allDefinedTables + missingTables
+
+        // Populate read and written tables
+        val allQueries = sqlFiles.flatMap { it.queries }
+
+        allQueries.forEach { query ->
+            query.tablesRead.forEach { allTables[it]!!.downstreamTables.addAll(query.tablesWritten) }
+            query.tablesWritten.forEach { allTables[it]!!.upstreamTables.addAll(query.tablesRead) }
         }
 
         val files = sqlFiles.sortedBy { it.fullPath }
 
-        render(databases, files).forEach {
+        render(allTables, files).forEach {
             contentArea.appendChild(it)
         }
 
         js("window.jQuery(document).foundation();")
     }
+
 
     private fun parseSqlFile(file: SqlFile) {
         println("Parsing ${file.fullPath}")
@@ -145,21 +145,44 @@ data class SqlFile(
     override fun toString() = fullPath
 }
 
+// Uniquely identifies a table,
+// scope is used to tables scoped to a file (ie temp tables)
+data class TableIdentifier(
+        val scope: String,
+        val database: String,
+        val name: String
+): Comparable<TableIdentifier> {
+    override fun compareTo(other: TableIdentifier): Int {
+        var c = this.scope.compareTo(other.scope)
+        if (c != 0) {
+            return c
+        }
+        c = this.database.compareTo(other.database)
+        if (c != 0) {
+            return c
+        }
+        return this.name.compareTo(other.name)
+    }
+}
 
 data class Table(
-        val database: String,
-        val name: String,
+        val id: TableIdentifier,
         val fields: List<Field>,
         val temporary: Boolean,
-        val comment: String?,
-        val location: String?,
-        val createTableStmt: String?,
-        val definedIn: SqlFile?
-)
+        val comment: String? = null,
+        val location: String? = null,
+        val createTableStmt: String? = null,
+        val definedIn: SqlFile? = null,
+        val upstreamTables: MutableSet<TableIdentifier> = mutableSetOf(),
+        val downstreamTables: MutableSet<TableIdentifier> = mutableSetOf()
+) {
+    override fun equals(other: Any?) = if (other is Table) id.equals(other.id) else false
+    override fun hashCode() = id.hashCode()
+}
 
 data class Query(
-        val tablesRead: List<Pair<String,String>>,
-        val tablesWriten: List<Pair<String,String>>
+        val tablesRead: Set<TableIdentifier>,
+        val tablesWritten: Set<TableIdentifier>
 )
 
 data class Field(
@@ -175,23 +198,30 @@ data class Field(
 
 
 class FileListener(val file: SqlFile): SqlBaseListener() {
-    private var tablesRead: MutableList<Pair<String, String>> = mutableListOf()
-    private var tablesWriten: MutableList<Pair<String, String>> = mutableListOf()
+    private val tempTablesDefinedSoFar = mutableSetOf<TableIdentifier>()
 
-    private var tablesInScope: MutableList<Pair<String, String>> = mutableListOf()
+    private var cteAliasesInScope = mutableSetOf<String>()
+    private var tablesRead = mutableSetOf<TableIdentifier>()
+    private var tablesWritten = mutableSetOf<TableIdentifier>()
+
+    // In practice should be an alias to one of the two sets defined above
+    // most of the time
+    private var tablesInScope = mutableSetOf<TableIdentifier>()
 
     override fun enterCreate_table_stmt(ctx: SqlParser.Create_table_stmtContext) {
-        val name = tableIdentifierToPair(ctx.findTable_identifier()!!)
+        val (db, name) = tableIdentifierToPair(ctx.findTable_identifier()!!)
         val temporary = ctx.TEMPORARY() != null
+        val scope = if(temporary) file.fullPath else ""
+        val id = TableIdentifier(scope, db, name)
         val comment = ctx.findCreate_table_comment_clause()?.STRING_LITERAL()?.let { stripString(it) }
         val location = ctx.findCreate_table_location_clause()?.STRING_LITERAL()?.let { stripString(it) }
         val content = ctx.position?.text(file.contents)
         var fields = ctx.findCreate_table_field_list()?.findField_spec()?.map { parseFieldSpec(it, false) } ?: listOf()
         fields += ctx.findCreate_table_partition_clause()?.findCreate_table_field_list()?.findField_spec()?.map { parseFieldSpec(it, true) } ?: listOf()
+
         file.definedTables.add(
                 Table(
-                        database = name.first,
-                        name = name.second,
+                        id = id,
                         fields = fields,
                         comment = comment,
                         temporary = temporary,
@@ -200,44 +230,61 @@ class FileListener(val file: SqlFile): SqlBaseListener() {
                         createTableStmt = content
                 )
         )
+
+        if (temporary) { tempTablesDefinedSoFar.add(id) }
     }
 
     override fun enterTop_level_insert_stmt(ctx: SqlParser.Top_level_insert_stmtContext) {
-        tablesRead = mutableListOf()
-        tablesWriten = mutableListOf()
+        cteAliasesInScope = mutableSetOf()
+        tablesRead = mutableSetOf()
+        tablesWritten = mutableSetOf()
         tablesInScope = tablesRead
     }
 
     override fun exitTop_level_insert_stmt(ctx: SqlParser.Top_level_insert_stmtContext) {
         file.queries.add(
-                Query(tablesRead = tablesRead.distinct(), tablesWriten = tablesWriten.distinct())
+                Query(tablesRead = tablesRead, tablesWritten = tablesWritten)
         )
-        tablesInScope = mutableListOf()
+        tablesInScope = mutableSetOf()
+        cteAliasesInScope = mutableSetOf()
     }
 
     override fun enterTop_level_select_stmt(ctx: SqlParser.Top_level_select_stmtContext) {
-        tablesRead = mutableListOf()
-        tablesWriten = mutableListOf()
+        tablesRead = mutableSetOf()
+        tablesWritten = mutableSetOf()
         tablesInScope = tablesRead
     }
 
     override fun exitTop_level_select_stmt(ctx: SqlParser.Top_level_select_stmtContext) {
         file.queries.add(
-                Query(tablesRead = tablesRead.distinct(), tablesWriten = tablesWriten.distinct())
+                Query(tablesRead = tablesRead, tablesWritten = tablesWritten)
         )
-        tablesInScope = mutableListOf()
+        tablesInScope = mutableSetOf()
+        cteAliasesInScope = mutableSetOf()
     }
 
     override fun enterInsert_clause(ctx: SqlParser.Insert_clauseContext) {
-        tablesInScope = tablesWriten
+        tablesInScope = tablesWritten
     }
 
     override fun exitInsert_clause(ctx: SqlParser.Insert_clauseContext) {
         tablesInScope = tablesRead
     }
 
+    override fun exitCte_sub_clause(ctx: SqlParser.Cte_sub_clauseContext) {
+        cteAliasesInScope.add(ctx.findIdentifier()!!.text.toUpperCase())
+    }
+
     override fun enterTable_identifier(ctx: SqlParser.Table_identifierContext) {
-        tablesInScope.add(tableIdentifierToPair(ctx))
+        val (db, name) = tableIdentifierToPair(ctx)
+        if (db != "DEFAULT" || name !in cteAliasesInScope) {
+            val tempId = TableIdentifier(file.fullPath, db, name)
+            if (tempId in tempTablesDefinedSoFar) {
+                tablesInScope.add(tempId)
+            } else {
+                tablesInScope.add(TableIdentifier("", db, name))
+            }
+        }
     }
 
     private fun parseFieldSpec(ctx: SqlParser.Field_specContext, isPartition: Boolean): Field {
@@ -255,7 +302,6 @@ class FileListener(val file: SqlFile): SqlBaseListener() {
                 partitionKey = isPartition
         )
     }
-
 
     private fun tableIdentifierToPair(ctx: SqlParser.Table_identifierContext): Pair<String, String> {
         val id = ctx.findQualified_identifier()!!
