@@ -46,10 +46,12 @@ create_table_stmt
   create_table_comment_clause?
   create_table_partition_clause?
   create_table_row_format_clause?
+  create_table_lines_format_clause?
   create_table_stored_as_clause?
   create_table_location_clause?
   create_table_tblproperties_clause?
-  anything* // Extra stuff
+  | CREATE TEMPORARY TABLE table_identifier AS select_stmt
+  | CREATE TEMPORARY TABLE table_identifier AS '(' select_stmt ')'
   ;
 
 create_table_comment_clause
@@ -58,6 +60,10 @@ create_table_comment_clause
 
 create_table_partition_clause
   : PARTITIONED BY create_table_field_list
+  ;
+
+create_table_lines_format_clause
+  : LINES TERMINATED BY STRING_LITERAL
   ;
 
 create_table_row_format_clause
@@ -272,6 +278,7 @@ expression
   | CAST '(' expression AS type ')'
   | expression '::' type // pg style cast
   | expression BETWEEN expression OP_AND expression
+  | expression BETWEEN hive_var_literal
   | CASE expression? (WHEN expression THEN expression)* (ELSE expression)? END
   | expression '[' expression ']'
   | OP_MINUS expression
@@ -376,6 +383,7 @@ keyword
   | LEFT
   | LIKE
   | LIMIT
+  | LINES
   | LOCATION
   | MACRO
   | NOT
@@ -507,6 +515,7 @@ LATERAL: L A T E R A L;
 LEFT: L E F T;
 LIKE: L I K E;
 LIMIT: L I M I T;
+LINES: L I N E S;
 LOCATION: L O C A T I O N;
 MACRO: M A C R O;
 NOT: N O T;

@@ -240,6 +240,20 @@ class FileListener(val file: SqlFile): SqlBaseListener() {
         )
 
         if (temporary) { tempTablesDefinedSoFar.add(id) }
+
+        // For the create table as select case
+        tablesWritten = mutableSetOf(id)
+        tablesRead = mutableSetOf()
+        tablesInScope = tablesRead
+    }
+
+    override fun exitCreate_table_stmt(ctx: SqlParser.Create_table_stmtContext) {
+        val tablesReallyRead = tablesRead - tablesWritten
+        if (tablesReallyRead.isNotEmpty()) {
+            file.queries.add(
+                    Query(tablesRead = tablesReallyRead, tablesWritten = tablesWritten)
+            )
+        }
     }
 
     // We'll just treat a view like a table and a query...
@@ -263,7 +277,7 @@ class FileListener(val file: SqlFile): SqlBaseListener() {
         )
 
         file.queries.add(
-                Query(tablesRead = tablesRead, tablesWritten = mutableSetOf(id))
+                Query(tablesRead = tablesRead - id, tablesWritten = mutableSetOf(id))
         )
     }
 

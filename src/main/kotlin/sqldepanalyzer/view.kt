@@ -98,9 +98,18 @@ fun renderTableDetails(allTables: Map<TableIdentifier, Table>, table: Table): HT
             }
         }
 
+        table.location?.let {
+            p {
+                b { +"Location : " }
+                code { +it }
+            }
+        }
+
         table.definedIn?.let {
-            b { +"Defined in : " }
-            +it.fullPath
+            p {
+                b { +"Defined in : " }
+                +it.fullPath
+            }
         }
 
         table.createTableStmt?.let { content ->
@@ -161,7 +170,6 @@ private fun FlowContent.downstreamPartial(allTables: Map<TableIdentifier, Table>
 
 // Get upstream tables but inline temp tables
 private fun upsteams(allTables: Map<TableIdentifier, Table>, table: Table): List<Table> {
-    println("finding upstreams for ${table.id}")
     return table.upstreamTables.filter { it != table.id }.map { allTables[it]!! }.flatMap {t ->
         if (t.temporary) {
             upsteams(allTables, t)
@@ -173,7 +181,6 @@ private fun upsteams(allTables: Map<TableIdentifier, Table>, table: Table): List
 
 
 private fun downstreams(allTables: Map<TableIdentifier, Table>, table: Table): List<Table> {
-    println("finding downstreams for ${table.id}")
     return table.downstreamTables.filter { it != table.id }.map { allTables[it]!! }.flatMap {t ->
         if (t.temporary) {
             downstreams(allTables, t)
