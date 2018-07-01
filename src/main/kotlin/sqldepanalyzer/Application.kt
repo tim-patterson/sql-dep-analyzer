@@ -89,7 +89,7 @@ class Application(private val dropArea: Element, private val contentArea: Elemen
             file.definedTables
         }.associateBy { it.id }
 
-        val allReferencedTables = sqlFiles.flatMap { it.queries }.flatMap { it.tablesRead + it.tablesWritten }.toSet()
+        val allReferencedTables = sqlFiles.flatMap { it.referencedTables }.toSet()
 
         val missingTableIds = allReferencedTables - allDefinedTables.keys
 
@@ -100,6 +100,13 @@ class Application(private val dropArea: Element, private val contentArea: Elemen
         )}.associateBy { it.id }
 
         val allTables = allDefinedTables + missingTables
+
+        // Populate table.referencedBy
+        sqlFiles.forEach { file ->
+            file.referencedTables.forEach { id ->
+                allTables[id]!!.referencedBy.add(file)
+            }
+        }
 
         // Populate read and written tables
         val allQueries = sqlFiles.flatMap { it.queries }
@@ -128,8 +135,6 @@ class Application(private val dropArea: Element, private val contentArea: Elemen
         parser.addErrorListener(ConsoleErrorListener())
         val listener = FileListener(file)
         ParseTreeWalker.DEFAULT.walk(listener, parser.file())
-        println(file.definedTables)
-        println(file.queries)
     }
 
 
@@ -140,7 +145,8 @@ data class SqlFile(
         val name: String,
         val contents: String,
         val definedTables: MutableList<Table> = mutableListOf(),
-        val queries: MutableList<Query> = mutableListOf()
+        val queries: MutableList<Query> = mutableListOf(),
+        val referencedTables: MutableSet<TableIdentifier> = mutableSetOf()
 ) {
     override fun toString() = fullPath
 }
@@ -174,7 +180,8 @@ data class Table(
         val createTableStmt: String? = null,
         val definedIn: SqlFile? = null,
         val upstreamTables: MutableSet<TableIdentifier> = mutableSetOf(),
-        val downstreamTables: MutableSet<TableIdentifier> = mutableSetOf()
+        val downstreamTables: MutableSet<TableIdentifier> = mutableSetOf(),
+        val referencedBy: MutableSet<SqlFile> = mutableSetOf()
 ) {
     override fun equals(other: Any?) = if (other is Table) id.equals(other.id) else false
     override fun hashCode() = id.hashCode()
@@ -200,6 +207,7 @@ data class Field(
 class FileListener(val file: SqlFile): SqlBaseListener() {
     private val tempTablesDefinedSoFar = mutableSetOf<TableIdentifier>()
 
+    // These are just in the scope of an individual query
     private var cteAliasesInScope = mutableSetOf<String>()
     private var tablesRead = mutableSetOf<TableIdentifier>()
     private var tablesWritten = mutableSetOf<TableIdentifier>()
@@ -232,6 +240,31 @@ class FileListener(val file: SqlFile): SqlBaseListener() {
         )
 
         if (temporary) { tempTablesDefinedSoFar.add(id) }
+    }
+
+    // We'll just treat a view like a table and a query...
+    override fun enterCreate_view_stmt(ctx: SqlParser.Create_view_stmtContext) {
+        tablesRead = mutableSetOf()
+        tablesInScope = tablesRead
+    }
+
+    override fun exitCreate_view_stmt(ctx: SqlParser.Create_view_stmtContext) {
+        val (db, name) = tableIdentifierToPair(ctx.findTable_identifier()!!)
+        val id = TableIdentifier("", db, name)
+        val content = ctx.position?.text(file.contents)
+        file.definedTables.add(
+                Table(
+                        id = id,
+                        fields = listOf(),
+                        definedIn = file,
+                        temporary = false,
+                        createTableStmt = content
+                )
+        )
+
+        file.queries.add(
+                Query(tablesRead = tablesRead, tablesWritten = mutableSetOf(id))
+        )
     }
 
     override fun enterTop_level_insert_stmt(ctx: SqlParser.Top_level_insert_stmtContext) {
@@ -282,7 +315,9 @@ class FileListener(val file: SqlFile): SqlBaseListener() {
             if (tempId in tempTablesDefinedSoFar) {
                 tablesInScope.add(tempId)
             } else {
-                tablesInScope.add(TableIdentifier("", db, name))
+                val id = TableIdentifier("", db, name)
+                file.referencedTables.add(id)
+                tablesInScope.add(id)
             }
         }
     }

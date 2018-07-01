@@ -90,6 +90,13 @@ fun renderTableDetails(allTables: Map<TableIdentifier, Table>, table: Table): HT
             h5 { +"Downstream Tables" }
             div("dep-list") { downstreamPartial(allTables, table) }
         }
+        hr()
+        h5 { + "Referenced by" }
+        ul("dep-list") {
+            table.referencedBy.sortedBy { it.fullPath }.forEach { file ->
+                li { + file.fullPath }
+            }
+        }
 
         table.definedIn?.let {
             b { +"Defined in : " }
