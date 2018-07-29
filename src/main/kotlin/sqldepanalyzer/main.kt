@@ -4,10 +4,12 @@ import kotlin.browser.document
 
 // Require styles etc
 val dummy = js("""
-    require("../node_modules/foundation-sites/dist/css/foundation.min.css");
-    window.jQuery = require("../node_modules/jquery/dist/jquery.min.js");
-    require("../node_modules/foundation-sites/dist/js/foundation.min.js");
-    require("../resources/main/styles.css");
+    require("foundation-sites/dist/css/foundation.min.css");
+    window.jQuery = require("jquery/dist/jquery.min.js");
+    require("foundation-sites/dist/js/foundation.min.js");
+    require("css/styles.css");
+    1; // The last line of this block gets compiled to dummy = 1; which then gets optimized out by dce
+    // This is why we need this here, otherwise our last require gets optimized out.
 """)
 
 

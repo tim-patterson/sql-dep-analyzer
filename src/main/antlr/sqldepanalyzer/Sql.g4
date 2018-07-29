@@ -287,7 +287,11 @@ expression
 function_call
   : identifier '(' DISTINCT? (expression (',' expression)*)? ')'
   | identifier '(' identifier FROM expression ')' // Werid syntax for hives extract function
-  | identifier '(' expression_list ')' OVER '('(PARTITION BY expression_list)? order_by_clause?')'
+  | identifier '(' expression_list ')' OVER '('(PARTITION BY expression_list)? order_by_clause? window_row_spec? ')'
+  ;
+
+window_row_spec
+  : ROWS BETWEEN (UNBOUNDED | NUMERIC_LITERAL) PRECEDING OP_AND (UNBOUNDED | NUMERIC_LITERAL) PRECEDING
   ;
 
 expression_list
@@ -397,9 +401,11 @@ keyword
   | OVERWRITE
   | PARTITION
   | PARTITIONED
+  | PRECEDING
   | PRIMARY
   | RIGHT
   | ROW
+  | ROWS
   | SCHEMA
   | SERDE
   | SERDEPROPERTIES
@@ -417,6 +423,7 @@ keyword
   | THEN
   | TRUE
   | TRUNCATE
+  | UNBOUNDED
   | UNION
   | WITH
   | WHEN
@@ -529,9 +536,11 @@ OVER: O V E R;
 OVERWRITE: O V E R W R I T E;
 PARTITION: P A R T I T I O N;
 PARTITIONED: P A R T I T I O N E D;
+PRECEDING: P R E C E D I N G;
 PRIMARY: P R I M A R Y;
 RIGHT: R I G H T;
 ROW: R O W;
+ROWS: R O W S;
 SCHEMA: S C H E M A;
 SERDE: S E R D E;
 SERDEPROPERTIES: S E R D E P R O P E R T I E S;
@@ -549,6 +558,7 @@ TERMINATED: T E R M I N A T E D;
 THEN: T H E N;
 TRUE: T R U E;
 TRUNCATE: T R U N C A T E;
+UNBOUNDED: U N B O U N D E D;
 UNION: U N I O N;
 WITH: W I T H;
 WHEN: W H E N;
