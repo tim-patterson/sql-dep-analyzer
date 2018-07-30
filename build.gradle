@@ -3,7 +3,7 @@ buildscript {
     ext.front_end_plugin_version = '0.0.33'
     ext.kotlinx_html_version = '0.6.11'
     ext.node_version = '10.7.0'
-    ext.antlr_kotlin_version = '75472e8'
+    ext.antlr_kotlin_version = '2b7630b'
 
     repositories {
         mavenCentral()
@@ -38,7 +38,7 @@ compileKotlin2Js {
     dependsOn generateGrammarSource
 
     kotlinOptions.metaInfo = true
-    kotlinOptions.outputFile = "$project.buildDir.path/js/${project.name}.js"
+    kotlinOptions.outputFile = "${project.buildDir.path}/js/${project.name}.js"
     kotlinOptions.sourceMap = true
     kotlinOptions.moduleKind = 'commonjs'
 }
